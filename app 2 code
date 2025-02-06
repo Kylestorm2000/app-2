@@ -1,0 +1,129 @@
+import SwiftUI
+import UserNotifications
+
+struct FoodItem: Identifiable, Codable {
+    var id = UUID()
+    var name: String
+    var quantity: Int
+    var threshold: Int
+}
+
+class FoodInventory: ObservableObject {
+    @Published var items: [FoodItem] = [] {
+        didSet {
+            saveData()
+        }
+    }
+    
+    init() {
+        loadData()
+    }
+    
+    func addItem(name: String, quantity: Int, threshold: Int) {
+        let newItem = FoodItem(name: name, quantity: quantity, threshold: threshold)
+        items.append(newItem)
+        checkThreshold()
+    }
+    
+    func updateItem(_ item: FoodItem, quantity: Int) {
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            items[index].quantity = quantity
+            checkThreshold()
+        }
+    }
+    
+    func checkThreshold() {
+        for item in items {
+            if item.quantity <= item.threshold {
+                sendNotification(for: item)
+            }
+        }
+    }
+    
+    private func sendNotification(for item: FoodItem) {
+        let content = UNMutableNotificationContent()
+        content.title = "Running Low on \(item.name)"
+        content.body = "You have \(item.quantity) left. Consider restocking!"
+        content.sound = .default
+        
+        let request = UNNotificationRequest(identifier: item.id.uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+    
+    private func saveData() {
+        if let encoded = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(encoded, forKey: "FoodInventory")
+        }
+    }
+    
+    private func loadData() {
+        if let savedData = UserDefaults.standard.data(forKey: "FoodInventory"),
+           let decoded = try? JSONDecoder().decode([FoodItem].self, from: savedData) {
+            items = decoded
+        }
+    }
+}
+
+struct ContentView: View {
+    @StateObject private var inventory = FoodInventory()
+    @State private var newName = ""
+    @State private var newQuantity = ""
+    @State private var newThreshold = ""
+    
+    var body: some View {
+        NavigationView {
+            VStack {
+                Form {
+                    Section(header: Text("Add New Item")) {
+                        TextField("Food Name", text: $newName)
+                        TextField("Quantity", text: $newQuantity)
+                            .keyboardType(.numberPad)
+                        TextField("Threshold", text: $newThreshold)
+                            .keyboardType(.numberPad)
+                        Button("Add Item") {
+                            if let quantity = Int(newQuantity), let threshold = Int(newThreshold) {
+                                inventory.addItem(name: newName, quantity: quantity, threshold: threshold)
+                                newName = ""
+                                newQuantity = ""
+                                newThreshold = ""
+                            }
+                        }
+                    }
+                    
+                    Section(header: Text("Food Inventory")) {
+                        List {
+                            ForEach(inventory.items) { item in
+                                HStack {
+                                    Text("\(item.name) - \(item.quantity) left")
+                                    Spacer()
+                                    Button("Use One") {
+                                        inventory.updateItem(item, quantity: max(0, item.quantity - 1))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Food Tracker")
+            .onAppear {
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            }
+        }
+    }
+}
+
+@main
+struct FoodTrackerApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+
+workflows:
+    sample-workflow:
+        name: Codemagic Sample Workflow
+        max_build_duration: 120
+        instance_type: mac_mini_m2
